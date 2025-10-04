@@ -40,7 +40,12 @@ def user_identity_lookup(user_id):
 @jwt.user_lookup_loader
 def user_lookup_callback(_jwt_header, jwt_data):
     identity = jwt_data["sub"]
-    return User.query.filter_by(id=int(identity)).one_or_none()
+    # Import here to avoid circular import at module level
+    from models import User
+    try:
+        return User.query.filter_by(id=int(identity)).one_or_none()
+    except Exception:
+        return None
 
 if __name__ == '__main__':
     with app.app_context():
