@@ -40,6 +40,14 @@ export const Navigation = () => {
               })}
             </div>
           </div>
+          <div className="flex items-center space-x-2">
+            <Link to="/signin" className="text-sm text-muted-foreground hover:text-primary">
+              Sign in
+            </Link>
+            <Link to="/signup" className="text-sm bg-primary text-primary-foreground px-3 py-1 rounded-md">
+              Sign up
+            </Link>
+          </div>
         </div>
       </div>
     </nav>

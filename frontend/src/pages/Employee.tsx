@@ -8,150 +8,136 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { StatusBadge } from "@/components/StatusBadge";
 import { toast } from "sonner";
 import { Upload } from "lucide-react";
+import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from "@/components/ui/select";
+import { sanitizeNumber, sanitizeText } from "@/lib/utils";
 
 interface Expense {
   id: string;
-  date: string;
-  amount: string;
-  purpose: string;
-  document: string;
-  status: "pending" | "approved" | "reimbursed" | "rejected";
+  date: string; // ISO Date
+  amount: number; // store numeric then format
+  category: string;
+  description: string;
+  attachmentName?: string;
+  status: "pending" | "approved" | "rejected" | "reimbursed";
 }
 
 const Employee = () => {
-  const [expenses, setExpenses] = useState<Expense[]>([
-    {
-      id: "1",
-      date: "2025-03-15",
-      amount: "$120.00",
-      purpose: "Client meeting lunch",
-      document: "receipt_001.pdf",
-      status: "approved",
-    },
-    {
-      id: "2",
-      date: "2025-03-10",
-      amount: "$450.00",
-      purpose: "Conference registration",
-      document: "invoice_002.pdf",
-      status: "reimbursed",
-    },
-    {
-      id: "3",
-      date: "2025-03-08",
-      amount: "$85.00",
-      purpose: "Office supplies",
-      document: "receipt_003.pdf",
-      status: "pending",
-    },
-  ]);
+  const [expenses, setExpenses] = useState<Expense[]>([]);
 
-  const [formData, setFormData] = useState({
+  const categories = ["Travel", "Meals", "Supplies", "Software", "Training", "Other"];
+
+  const [formData, setFormData] = useState<{
+    amount: string;
+    description: string;
+    date: string;
+    category: string;
+    attachment: File | null;
+  }>({
     amount: "",
-    purpose: "",
-    document: null as File | null,
+    description: "",
+    date: new Date().toISOString().split("T")[0],
+    category: "Travel",
+    attachment: null,
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!formData.amount || !formData.purpose) {
+    if (!formData.amount || !formData.description || !formData.date) {
       toast.error("Please fill in all required fields");
       return;
     }
 
+    const sanitizedDescription = sanitizeText(formData.description, { max: 1000 });
+    const sanitizedCategory = sanitizeText(formData.category, { max: 40 });
+    const amtNum = parseFloat(sanitizeNumber(formData.amount));
+    if (isNaN(amtNum) || amtNum <= 0) {
+      toast.error("Invalid amount");
+      return;
+    }
     const newExpense: Expense = {
-      id: String(expenses.length + 1),
-      date: new Date().toISOString().split("T")[0],
-      amount: `$${parseFloat(formData.amount).toFixed(2)}`,
-      purpose: formData.purpose,
-      document: formData.document?.name || "No document",
+      id: crypto.randomUUID(),
+      date: formData.date,
+      amount: amtNum,
+      category: sanitizedCategory,
+      description: sanitizedDescription,
+      attachmentName: formData.attachment?.name,
       status: "pending",
     };
-
     setExpenses([newExpense, ...expenses]);
-    setFormData({ amount: "", purpose: "", document: null });
-    toast.success("Expense submitted successfully");
+    setFormData({ amount: "", description: "", date: new Date().toISOString().split("T")[0], category: "Travel", attachment: null });
+    toast.success("Expense submitted");
   };
 
   return (
     <div className="container mx-auto px-6 py-8">
       <div className="mb-8">
         <h1 className="text-3xl font-bold mb-2">Employee Portal</h1>
-        <p className="text-muted-foreground">Submit and track your expense requests</p>
+        <p className="text-muted-foreground">Submit new expenses and track their approval status.</p>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>Submit New Expense</CardTitle>
-            <CardDescription>Fill in the details of your expense claim</CardDescription>
+            <CardTitle>New Expense</CardTitle>
+            <CardDescription>Enter details below</CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="amount">Amount ($)</Label>
-                <Input
-                  id="amount"
-                  type="number"
-                  step="0.01"
-                  placeholder="0.00"
-                  value={formData.amount}
-                  onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
-                  required
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="purpose">Purpose</Label>
-                <Textarea
-                  id="purpose"
-                  placeholder="Describe the purpose of this expense"
-                  value={formData.purpose}
-                  onChange={(e) => setFormData({ ...formData, purpose: e.target.value })}
-                  required
-                  rows={3}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="document">Proof Document</Label>
-                <div className="flex items-center gap-2">
-                  <Input
-                    id="document"
-                    type="file"
-                    onChange={(e) =>
-                      setFormData({ ...formData, document: e.target.files?.[0] || null })
-                    }
-                    className="cursor-pointer"
-                  />
-                  <Upload className="h-4 w-4 text-muted-foreground" />
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="date">Date</Label>
+                  <Input id="date" type="date" value={formData.date} onChange={(e) => setFormData({ ...formData, date: e.target.value })} required />
                 </div>
-                {formData.document && (
-                  <p className="text-sm text-muted-foreground">{formData.document.name}</p>
-                )}
+                <div className="space-y-2">
+                  <Label htmlFor="amount">Amount</Label>
+                  <Input id="amount" type="number" step="0.01" value={formData.amount} onChange={(e) => setFormData({ ...formData, amount: e.target.value })} required />
+                </div>
               </div>
-
-              <Button type="submit" className="w-full">
-                Submit Expense
-              </Button>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="category">Category</Label>
+                  <Select value={formData.category} onValueChange={(v) => setFormData({ ...formData, category: v })}>
+                    <SelectTrigger id="category">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {categories.map((c) => (
+                        <SelectItem key={c} value={c}>{c}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="attachment">Attachment</Label>
+                  <div className="flex items-center gap-2">
+                    <Input id="attachment" type="file" onChange={(e) => setFormData({ ...formData, attachment: e.target.files?.[0] || null })} />
+                    <Upload className="h-4 w-4 text-muted-foreground" />
+                  </div>
+                  {formData.attachment && <p className="text-xs text-muted-foreground truncate">{formData.attachment.name}</p>}
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="description">Description</Label>
+                <Textarea id="description" rows={3} value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} required placeholder="Describe the expense" />
+              </div>
+              <Button type="submit" className="w-full">Submit</Button>
             </form>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle>Recent Submissions</CardTitle>
-            <CardDescription>Track the status of your expense claims</CardDescription>
+            <CardTitle>Recent (Latest 5)</CardTitle>
+            <CardDescription>Most recent expenses</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {expenses.slice(0, 3).map((expense) => (
-                <div key={expense.id} className="flex justify-between items-start p-4 border rounded-lg">
+              {expenses.slice(0, 5).map((expense) => (
+                <div key={expense.id} className="flex justify-between items-start p-3 border rounded-md">
                   <div className="space-y-1">
-                    <p className="font-medium">{expense.purpose}</p>
-                    <p className="text-sm text-muted-foreground">{expense.date}</p>
-                    <p className="text-sm font-semibold text-primary">{expense.amount}</p>
+                    <p className="font-medium">{expense.description}</p>
+                    <p className="text-xs text-muted-foreground">{expense.category} • {expense.date}</p>
+                    <p className="text-xs font-semibold text-primary">${expense.amount.toFixed(2)}</p>
                   </div>
                   <StatusBadge status={expense.status} />
                 </div>
@@ -164,16 +150,17 @@ const Employee = () => {
       <Card className="mt-6">
         <CardHeader>
           <CardTitle>All Expenses</CardTitle>
-          <CardDescription>Complete history of your expense submissions</CardDescription>
+          <CardDescription>History of your submissions</CardDescription>
         </CardHeader>
         <CardContent>
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Date</TableHead>
+                <TableHead>Category</TableHead>
+                <TableHead>Description</TableHead>
                 <TableHead>Amount</TableHead>
-                <TableHead>Purpose</TableHead>
-                <TableHead>Document</TableHead>
+                <TableHead>Attachment</TableHead>
                 <TableHead>Status</TableHead>
               </TableRow>
             </TableHeader>
@@ -181,12 +168,11 @@ const Employee = () => {
               {expenses.map((expense) => (
                 <TableRow key={expense.id}>
                   <TableCell className="font-medium">{expense.date}</TableCell>
-                  <TableCell>{expense.amount}</TableCell>
-                  <TableCell>{expense.purpose}</TableCell>
-                  <TableCell className="text-muted-foreground">{expense.document}</TableCell>
-                  <TableCell>
-                    <StatusBadge status={expense.status} />
-                  </TableCell>
+                  <TableCell>{expense.category}</TableCell>
+                  <TableCell className="max-w-xs truncate" title={expense.description}>{expense.description}</TableCell>
+                  <TableCell>${expense.amount.toFixed(2)}</TableCell>
+                  <TableCell className="text-muted-foreground text-xs">{expense.attachmentName || '—'}</TableCell>
+                  <TableCell><StatusBadge status={expense.status} /></TableCell>
                 </TableRow>
               ))}
             </TableBody>

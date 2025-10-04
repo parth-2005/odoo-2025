@@ -2,114 +2,46 @@ import { useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Checkbox } from "@/components/ui/checkbox";
 import { StatusBadge } from "@/components/StatusBadge";
 import { toast } from "sonner";
-import { CheckCircle2, XCircle, FileText } from "lucide-react";
+import { CheckCircle2, XCircle, Eye } from "lucide-react";
+import { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
+import { sanitizeText } from "@/lib/utils";
 
-interface PendingExpense {
+interface ReviewExpense {
   id: string;
-  employeeName: string;
-  department: string;
-  date: string;
-  amount: string;
-  purpose: string;
-  document: string;
+  requester: string;
+  date: string; // ISO date
+  category: string;
+  description: string;
+  amount: number;
   status: "pending" | "approved" | "rejected";
 }
 
 const Manager = () => {
-  const [expenses, setExpenses] = useState<PendingExpense[]>([
-    {
-      id: "1",
-      employeeName: "Sarah Johnson",
-      department: "Marketing",
-      date: "2025-03-18",
-      amount: "$320.00",
-      purpose: "Marketing materials for Q2 campaign",
-      document: "receipt_m001.pdf",
-      status: "pending",
-    },
-    {
-      id: "2",
-      employeeName: "Michael Chen",
-      department: "Sales",
-      date: "2025-03-17",
-      amount: "$150.00",
-      purpose: "Client dinner meeting",
-      document: "receipt_m002.pdf",
-      status: "pending",
-    },
-    {
-      id: "3",
-      employeeName: "Emma Davis",
-      department: "IT",
-      date: "2025-03-16",
-      amount: "$540.00",
-      purpose: "Software license renewal",
-      document: "invoice_m003.pdf",
-      status: "pending",
-    },
-    {
-      id: "4",
-      employeeName: "James Wilson",
-      department: "Operations",
-      date: "2025-03-15",
-      amount: "$89.00",
-      purpose: "Office supplies",
-      document: "receipt_m004.pdf",
-      status: "approved",
-    },
+  const [expenses, setExpenses] = useState<ReviewExpense[]>([
+    { id: '1', requester: 'Sarah Johnson', date: '2025-03-18', category: 'Travel', description: 'Flight to client meeting', amount: 320, status: 'pending' },
+    { id: '2', requester: 'Michael Chen', date: '2025-03-17', category: 'Meals', description: 'Client dinner meeting', amount: 150, status: 'pending' },
+    { id: '3', requester: 'Emma Davis', date: '2025-03-16', category: 'Software', description: 'License renewal', amount: 540, status: 'approved' },
+    { id: '4', requester: 'James Wilson', date: '2025-03-15', category: 'Supplies', description: 'Office supplies', amount: 89, status: 'rejected' },
   ]);
 
-  const [selectedExpenses, setSelectedExpenses] = useState<string[]>([]);
-
-  const handleSelectExpense = (expenseId: string) => {
-    setSelectedExpenses((prev) =>
-      prev.includes(expenseId)
-        ? prev.filter((id) => id !== expenseId)
-        : [...prev, expenseId]
-    );
+  const updateStatus = (id: string, status: 'approved' | 'rejected') => {
+    setExpenses(prev => prev.map(e => e.id === id ? { ...e, status } : e));
+    toast.success(`Expense ${status}`);
   };
 
-  const handleApprove = () => {
-    if (selectedExpenses.length === 0) {
-      toast.error("Please select at least one expense to approve");
-      return;
-    }
-
-    setExpenses((prev) =>
-      prev.map((expense) =>
-        selectedExpenses.includes(expense.id)
-          ? { ...expense, status: "approved" as const }
-          : expense
-      )
-    );
-
-    toast.success(`${selectedExpenses.length} expense(s) approved successfully`);
-    setSelectedExpenses([]);
+  const downloadAttachment = (exp: ReviewExpense) => {
+    // Placeholder dummy file (in real app fetch actual file URL)
+    const content = `Expense Detail\nRequester: ${exp.requester}\nDate: ${exp.date}\nCategory: ${exp.category}\nDescription: ${exp.description}\nAmount: ${exp.amount}`;
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `expense_${exp.id}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
-
-  const handleReject = () => {
-    if (selectedExpenses.length === 0) {
-      toast.error("Please select at least one expense to reject");
-      return;
-    }
-
-    setExpenses((prev) =>
-      prev.map((expense) =>
-        selectedExpenses.includes(expense.id)
-          ? { ...expense, status: "rejected" as const }
-          : expense
-      )
-    );
-
-    toast.success(`${selectedExpenses.length} expense(s) rejected`);
-    setSelectedExpenses([]);
-  };
-
-  const pendingExpenses = expenses.filter((e) => e.status === "pending");
-  const processedExpenses = expenses.filter((e) => e.status !== "pending");
 
   return (
     <div className="container mx-auto px-6 py-8">
@@ -118,125 +50,104 @@ const Manager = () => {
         <p className="text-muted-foreground">Review and approve expense requests from your team</p>
       </div>
 
-      <Card className="mb-6">
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle>Pending Approvals</CardTitle>
-              <CardDescription>
-                {pendingExpenses.length} expense(s) awaiting your review
-              </CardDescription>
-            </div>
-            <div className="flex gap-2">
-              <Button
-                onClick={handleApprove}
-                disabled={selectedExpenses.length === 0}
-                className="bg-success hover:bg-success/90"
-              >
-                <CheckCircle2 className="mr-2 h-4 w-4" />
-                Approve Selected
-              </Button>
-              <Button
-                onClick={handleReject}
-                disabled={selectedExpenses.length === 0}
-                variant="destructive"
-              >
-                <XCircle className="mr-2 h-4 w-4" />
-                Reject Selected
-              </Button>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-12"></TableHead>
-                <TableHead>Employee</TableHead>
-                <TableHead>Department</TableHead>
-                <TableHead>Date</TableHead>
-                <TableHead>Amount</TableHead>
-                <TableHead>Purpose</TableHead>
-                <TableHead>Document</TableHead>
-                <TableHead>Status</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {pendingExpenses.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
-                    No pending expenses to review
-                  </TableCell>
-                </TableRow>
-              ) : (
-                pendingExpenses.map((expense) => (
-                  <TableRow key={expense.id}>
-                    <TableCell>
-                      <Checkbox
-                        checked={selectedExpenses.includes(expense.id)}
-                        onCheckedChange={() => handleSelectExpense(expense.id)}
-                      />
-                    </TableCell>
-                    <TableCell className="font-medium">{expense.employeeName}</TableCell>
-                    <TableCell>{expense.department}</TableCell>
-                    <TableCell>{expense.date}</TableCell>
-                    <TableCell className="font-semibold">{expense.amount}</TableCell>
-                    <TableCell>{expense.purpose}</TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2 text-muted-foreground">
-                        <FileText className="h-4 w-4" />
-                        <span className="text-sm">{expense.document}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <StatusBadge status={expense.status} />
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-
       <Card>
         <CardHeader>
-          <CardTitle>Recently Processed</CardTitle>
-          <CardDescription>Expenses you have already reviewed</CardDescription>
+          <CardTitle>Team Expenses</CardTitle>
+          <CardDescription>Review submitted expenses</CardDescription>
         </CardHeader>
         <CardContent>
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Employee</TableHead>
-                <TableHead>Department</TableHead>
+                <TableHead>Requester</TableHead>
                 <TableHead>Date</TableHead>
+                <TableHead>Category</TableHead>
+                <TableHead>Description</TableHead>
                 <TableHead>Amount</TableHead>
-                <TableHead>Purpose</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {processedExpenses.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
-                    No processed expenses yet
+              {expenses.map(exp => (
+                <TableRow key={exp.id}>
+                  <TableCell className="font-medium">{exp.requester}</TableCell>
+                  <TableCell>{exp.date}</TableCell>
+                  <TableCell>{exp.category}</TableCell>
+                  <TableCell className="max-w-xs truncate" title={exp.description}>{exp.description}</TableCell>
+                  <TableCell>${exp.amount.toFixed(2)}</TableCell>
+                  <TableCell><StatusBadge status={exp.status} /></TableCell>
+                  <TableCell>
+                    <div className="flex gap-2">
+                      <Dialog>
+                        <DialogTrigger asChild>
+                          <Button size="sm" variant="outline" className="h-8 px-2">
+                            <Eye className="h-4 w-4 mr-1" /> View
+                          </Button>
+                        </DialogTrigger>
+                        <DialogContent className="max-w-xl">
+                          <DialogHeader>
+                            <DialogTitle>Expense #{exp.id}</DialogTitle>
+                            <DialogDescription>Submitted by {exp.requester} on {exp.date}</DialogDescription>
+                          </DialogHeader>
+                          <div className="space-y-3 text-sm">
+                            <div className="grid grid-cols-3 gap-2">
+                              <span className="font-medium">Category:</span>
+                              <span className="col-span-2">{exp.category}</span>
+                              <span className="font-medium">Amount:</span>
+                              <span className="col-span-2">${exp.amount.toFixed(2)}</span>
+                              <span className="font-medium">Status:</span>
+                              <span className="col-span-2 capitalize">{exp.status}</span>
+                            </div>
+                            <div>
+                              <p className="font-medium mb-1">Description</p>
+                              <p className="whitespace-pre-wrap border rounded p-2 bg-muted/40 max-h-56 overflow-auto text-xs">
+                                {sanitizeText(exp.description, { max: 5000 })}
+                              </p>
+                            </div>
+                          </div>
+                          <DialogFooter className="mt-4 flex flex-row justify-between sm:justify-between">
+                            <div className="flex gap-2">
+                              {exp.status === 'pending' && (
+                                <>
+                                  <Button size="sm" onClick={() => updateStatus(exp.id, 'approved')}>
+                                    <CheckCircle2 className="h-4 w-4 mr-1" /> Approve
+                                  </Button>
+                                  <Button size="sm" variant="destructive" onClick={() => updateStatus(exp.id, 'rejected')}>
+                                    <XCircle className="h-4 w-4 mr-1" /> Reject
+                                  </Button>
+                                </>
+                              )}
+                            </div>
+                            <div className="flex gap-2">
+                              <Button size="sm" variant="secondary" onClick={() => downloadAttachment(exp)}>
+                                Download
+                              </Button>
+                              <DialogClose asChild>
+                                <Button size="sm" variant="outline">Close</Button>
+                              </DialogClose>
+                            </div>
+                          </DialogFooter>
+                        </DialogContent>
+                      </Dialog>
+                      {exp.status === 'pending' ? (
+                        <>
+                          <Button size="sm" className="h-8 px-2" onClick={() => updateStatus(exp.id, 'approved')}>
+                            <CheckCircle2 className="h-4 w-4 mr-1" />
+                            Approve
+                          </Button>
+                          <Button size="sm" variant="destructive" className="h-8 px-2" onClick={() => updateStatus(exp.id, 'rejected')}>
+                            <XCircle className="h-4 w-4 mr-1" />
+                            Reject
+                          </Button>
+                        </>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </div>
                   </TableCell>
                 </TableRow>
-              ) : (
-                processedExpenses.map((expense) => (
-                  <TableRow key={expense.id}>
-                    <TableCell className="font-medium">{expense.employeeName}</TableCell>
-                    <TableCell>{expense.department}</TableCell>
-                    <TableCell>{expense.date}</TableCell>
-                    <TableCell className="font-semibold">{expense.amount}</TableCell>
-                    <TableCell>{expense.purpose}</TableCell>
-                    <TableCell>
-                      <StatusBadge status={expense.status} />
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
+              ))}
             </TableBody>
           </Table>
         </CardContent>
