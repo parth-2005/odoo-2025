@@ -1,5 +1,5 @@
 // Centralized API client for Expense Management backend
-// Uses fetch; can be swapped for axios if desired.
+import axios from "axios";
 
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
 
@@ -8,32 +8,50 @@ export interface ApiError extends Error {
   payload?: any;
 }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const token = localStorage.getItem("access_token");
-  const headers: Record<string, string> = {
+const axiosInstance = axios.create({
+  baseURL: API_BASE_URL,
+  headers: {
     "Content-Type": "application/json",
-    ...(options.headers as Record<string, string>),
-  };
-  if (token) headers.Authorization = `Bearer ${token}`;
+  },
+});
 
-  const res = await fetch(`${API_BASE_URL}${path}`, {
-    ...options,
-    headers,
-  });
-
-  let data: any = null;
-  const text = await res.text();
-  if (text) {
-    try { data = JSON.parse(text); } catch { data = text; }
+axiosInstance.interceptors.request.use((config) => {
+  const token = localStorage.getItem("access_token");
+  if (token) {
+    if (config.headers) {
+      // If headers is an AxiosHeaders instance, use set; otherwise, assign property
+      if (typeof (config.headers as any).set === "function") {
+        (config.headers as any).set("Authorization", `Bearer ${token}`);
+      } else {
+        Object.assign(config.headers, { Authorization: `Bearer ${token}` });
+      }
+    } else {
+      config.headers = { Authorization: `Bearer ${token}` };
+    }
   }
+  return config;
+});
 
-  if (!res.ok) {
-    const err: ApiError = new Error(data?.message || data?.error || `HTTP ${res.status}`);
-    err.status = res.status;
-    err.payload = data;
+
+
+async function request<T>(path: string, options: any = {}): Promise<T> {
+  try {
+    const res = await axiosInstance({
+      url: path,
+      ...options,
+    });
+    return res.data as T;
+  } catch (error) {
+    let err: ApiError;
+  if ((axios as any).isAxiosError && (axios as any).isAxiosError(error)) {
+      err = new Error(error.response?.data?.message || error.response?.data?.error || error.message) as ApiError;
+      err.status = error.response?.status;
+      err.payload = error.response?.data;
+    } else {
+      err = new Error("Unknown error") as ApiError;
+    }
     throw err;
   }
-  return data as T;
 }
 
 // Auth
@@ -53,8 +71,8 @@ export interface AuthResponse {
 }
 
 export const authApi = {
-  signup: (payload: SignupPayload) => request<AuthResponse>("/auth/signup", { method: "POST", body: JSON.stringify(payload) }),
-  login: (payload: LoginPayload) => request<AuthResponse>("/auth/login", { method: "POST", body: JSON.stringify(payload) }),
+  signup: (payload: SignupPayload) => request<AuthResponse>("/auth/signup", { method: "POST", data: payload }),
+  login: (payload: LoginPayload) => request<AuthResponse>("/auth/login", { method: "POST", data: payload }),
 };
 
 // Users
@@ -67,7 +85,7 @@ export interface CreateUserPayload {
 }
 export const usersApi = {
   list: () => request<{ users: any[] }>("/users"),
-  create: (payload: CreateUserPayload) => request("/users", { method: "POST", body: JSON.stringify(payload) }),
+  create: (payload: CreateUserPayload) => request("/users", { method: "POST", data: payload }),
 };
 
 // Expenses
@@ -78,19 +96,19 @@ export interface ExpensePayload {
   receipt_path?: string;
 }
 export const expensesApi = {
-  create: (p: ExpensePayload) => request("/expenses", { method: "POST", body: JSON.stringify(p) }),
+  create: (p: ExpensePayload) => request("/expenses", { method: "POST", data: p }),
   list: (params?: { status?: string; user_id?: number }) => {
     const qs = params ? `?${new URLSearchParams(Object.entries(params).filter(([_,v]) => v !== undefined) as any)}` : "";
     return request<{ expenses: any[] }>(`/expenses${qs}`);
   },
   approve: (id: number, decision: "approved" | "rejected", comments?: string) =>
-    request(`/expenses/${id}/approve`, { method: "POST", body: JSON.stringify({ decision, comments }) }),
+    request(`/expenses/${id}/approve`, { method: "POST", data: { decision, comments } }),
 };
 
 // Approval Flows
 export const flowsApi = {
   get: () => request<{ flow: any }>("/flows"),
-  upsert: (config: any) => request("/flows", { method: "POST", body: JSON.stringify({ config }) }),
+  upsert: (payload: any) => request("/flows", { method: "POST", data: payload }),
 };
 
 // Audit

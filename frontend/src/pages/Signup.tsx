@@ -15,14 +15,12 @@ import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
 import { roleLanding } from "@/components/ProtectedRoute";
 
+import axios from "axios";
 const fetchCountries = async () => {
-  const res = await fetch("https://restcountries.com/v3.1/all?fields=name,cca2");
-  if (!res.ok) throw new Error("Failed to fetch countries");
-  const data = await res.json();
+  const res = await axios.get("https://restcountries.com/v3.1/all?fields=name,cca2");
+  const data = res.data;
   return (
-    data
-      .map((c: any) => ({ code: c.cca2, name: c.name?.common ?? c.name }))
-      .sort((a: any, b: any) => a.name.localeCompare(b.name)) || []
+    data.map((c: any) => ({ code: c.cca2, name: c.name?.common ?? c.name })).sort((a: any, b: any) => a.name.localeCompare(b.name)) || []
   );
 };
 

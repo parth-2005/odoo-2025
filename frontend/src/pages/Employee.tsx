@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { Upload } from "lucide-react";
 import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from "@/components/ui/select";
 import { sanitizeNumber, sanitizeText } from "@/lib/utils";
+import { expensesApi } from "@/lib/api";
 
 interface Expense {
   id: string;
@@ -23,9 +24,8 @@ interface Expense {
 
 const Employee = () => {
   const [expenses, setExpenses] = useState<Expense[]>([]);
-
+  const [loading, setLoading] = useState(false);
   const categories = ["Travel", "Meals", "Supplies", "Software", "Training", "Other"];
-
   const [formData, setFormData] = useState<{
     amount: string;
     description: string;
@@ -40,13 +40,56 @@ const Employee = () => {
     attachment: null,
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // Fetch expenses on mount
+  // Helper to get current user from localStorage (from login response)
+  function getCurrentUser() {
+    try {
+      const user = localStorage.getItem("auth_user");
+      console.log('Current user from localStorage:', user);
+      return user ? JSON.parse(user) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  useEffect(() => {
+    const fetchExpenses = async () => {
+      setLoading(true);
+      try {
+        const currentUser = getCurrentUser();
+        if (!currentUser) {
+          toast.error("User not found. Please log in again.");
+          setLoading(false);
+          return;
+        }
+        // Always send user_id as a number
+        const res = await expensesApi.list({ user_id: Number(currentUser.id) });
+        setExpenses(res.expenses.map((exp: any) => ({
+          id: String(exp.id),
+          date: exp.created_at ? exp.created_at.split("T")[0] : "-",
+          amount: parseFloat(exp.amount),
+          category: exp.category || "-",
+          description: exp.description,
+          attachmentName: exp.receipt_path || undefined,
+          status: exp.status,
+        })));
+      } catch (err: any) {
+        // Show more error info for debugging
+        if (err.status === 403) toast.error("You are not allowed to view these expenses.");
+        else toast.error(`Failed to load expenses: ${err?.message || err}`);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchExpenses();
+  }, []);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.amount || !formData.description || !formData.date) {
       toast.error("Please fill in all required fields");
       return;
     }
-
     const sanitizedDescription = sanitizeText(formData.description, { max: 1000 });
     const sanitizedCategory = sanitizeText(formData.category, { max: 40 });
     const amtNum = parseFloat(sanitizeNumber(formData.amount));
@@ -54,18 +97,35 @@ const Employee = () => {
       toast.error("Invalid amount");
       return;
     }
-    const newExpense: Expense = {
-      id: crypto.randomUUID(),
-      date: formData.date,
-      amount: amtNum,
-      category: sanitizedCategory,
-      description: sanitizedDescription,
-      attachmentName: formData.attachment?.name,
-      status: "pending",
-    };
-    setExpenses([newExpense, ...expenses]);
-    setFormData({ amount: "", description: "", date: new Date().toISOString().split("T")[0], category: "Travel", attachment: null });
-    toast.success("Expense submitted");
+    try {
+      setLoading(true);
+      // TODO: handle file upload if needed
+      await expensesApi.create({
+        amount: amtNum,
+        currency_code: "USD", // TODO: get user's currency if needed
+        description: sanitizedDescription,
+        receipt_path: formData.attachment?.name, // placeholder, backend should handle file upload
+      });
+      toast.success("Expense submitted");
+      setFormData({ amount: "", description: "", date: new Date().toISOString().split("T")[0], category: "Travel", attachment: null });
+      // Refresh expenses for current user only
+      const currentUser = getCurrentUser();
+      if (!currentUser) throw new Error("User not found");
+      const res = await expensesApi.list({ user_id: currentUser.id });
+      setExpenses(res.expenses.map((exp: any) => ({
+        id: String(exp.id),
+        date: exp.created_at ? exp.created_at.split("T")[0] : "-",
+        amount: parseFloat(exp.amount),
+        category: exp.category || "-",
+        description: exp.description,
+        attachmentName: exp.receipt_path || undefined,
+        status: exp.status,
+      })));
+    } catch (err: any) {
+      toast.error("Failed to submit expense");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (

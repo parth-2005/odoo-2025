@@ -186,6 +186,87 @@ def list_users():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
+@users_bp.route('/<int:user_id>', methods=['PATCH'])
+@jwt_required()
+def update_user(user_id):
+    try:
+        current_user_id = get_jwt_identity()
+        current_user = User.query.get(int(current_user_id))
+
+        if not current_user:
+            return jsonify({'error': 'User not found'}), 401
+
+        if current_user.role != UserRole.admin:
+            return jsonify({'error': 'Admin access required'}), 403
+
+        user = User.query.get(user_id)
+        if not user or user.company_id != current_user.company_id:
+            return jsonify({'error': 'User not found'}), 404
+
+        data = request.get_json() or {}
+
+        # Allowed fields to update
+        if data.get('email'):
+            user.email = data['email']
+        if data.get('full_name'):
+            user.full_name = data['full_name']
+        if data.get('manager_id') is not None:
+            user.manager_id = data.get('manager_id')
+        if data.get('role'):
+            try:
+                user.role = UserRole(data['role'])
+            except ValueError:
+                return jsonify({'error': 'Invalid role'}), 400
+        if data.get('password'):
+            user.password_hash = generate_password_hash(data['password'])
+
+        db.session.commit()
+
+        return jsonify({'message': 'User updated successfully', 'user': {
+            'id': user.id,
+            'email': user.email,
+            'full_name': user.full_name,
+            'role': user.role.value,
+            'company_id': user.company_id,
+            'manager_id': user.manager_id
+        }}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
+
+@users_bp.route('/<int:user_id>', methods=['DELETE'])
+@jwt_required()
+def delete_user(user_id):
+    try:
+        current_user_id = get_jwt_identity()
+        current_user = User.query.get(int(current_user_id))
+
+        if not current_user:
+            return jsonify({'error': 'User not found'}), 401
+
+        if current_user.role != UserRole.admin:
+            return jsonify({'error': 'Admin access required'}), 403
+
+        user = User.query.get(user_id)
+        if not user or user.company_id != current_user.company_id:
+            return jsonify({'error': 'User not found'}), 404
+
+        # Prevent deleting the last admin or self-deleting (optional safety)
+        if user.id == current_user.id:
+            return jsonify({'error': 'Cannot delete yourself'}), 400
+
+        db.session.delete(user)
+        db.session.commit()
+
+        return jsonify({'message': 'User deleted successfully'}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 500
+
 # Expense routes
 @expenses_bp.route('', methods=['POST'])
 @jwt_required()
@@ -265,9 +346,32 @@ def list_expenses():
         # Get query parameters
         status = request.args.get('status')
         user_id = request.args.get('user_id')
-        
-        # Build query
-        query = Expense.query.filter_by(company_id=current_user.company_id)
+        print(current_user.role)
+        print(current_user.id)
+        # Build base company query
+        # Role-based scoping:
+        # - admin: sees all company expenses
+        # - manager: sees own expenses and those of direct reports
+        # - employee: sees only their own expenses
+        if current_user.role == UserRole.admin:
+            query = Expense.query.filter_by(company_id=current_user.company_id)
+        elif current_user.role == UserRole.manager:
+            # collect subordinate ids recursively (include indirect reports)
+            subordinates = []
+            queue = [current_user.id]
+            while queue:
+                mid = queue.pop(0)
+                children = User.query.filter_by(manager_id=mid).all()
+                for c in children:
+                    if c.id not in subordinates:
+                        subordinates.append(c.id)
+                        queue.append(c.id)
+            allowed_ids = subordinates + [current_user.id]
+            print(allowed_ids)
+            query = Expense.query.filter(Expense.company_id == current_user.company_id, Expense.submitter_id.in_(allowed_ids))
+        else:
+            # employee
+            query = Expense.query.filter_by(company_id=current_user.company_id, submitter_id=current_user.id)
         
         if status:
             try:
@@ -277,7 +381,36 @@ def list_expenses():
                 return jsonify({'error': 'Invalid status'}), 400
         
         if user_id:
-            query = query.filter_by(submitter_id=user_id)
+            # enforce scoping when user_id param is provided
+            try:
+                uid = int(user_id)
+            except Exception:
+                return jsonify({'error': 'invalid user_id'}), 400
+
+            # Admin can query any user in company
+            if current_user.role == UserRole.admin:
+                query = query.filter_by(submitter_id=uid)
+            elif current_user.role == UserRole.manager:
+                # manager may query only themselves or their (direct or indirect) subordinates
+                # build subordinate set
+                subordinates = []
+                queue = [current_user.id]
+                while queue:
+                    mid = queue.pop(0)
+                    children = User.query.filter_by(manager_id=mid).all()
+                    for c in children:
+                        if c.id not in subordinates:
+                            subordinates.append(c.id)
+                            queue.append(c.id)
+
+                if uid != current_user.id and uid not in subordinates:
+                    return jsonify({'error': 'Access denied'}), 403
+                query = query.filter_by(submitter_id=uid)
+            else:
+                # employee may only query their own
+                if uid != current_user.id:
+                    return jsonify({'error': 'Access denied'}), 403
+                query = query.filter_by(submitter_id=uid)
         
         expenses = query.order_by(Expense.created_at.desc()).all()
         
@@ -326,14 +459,35 @@ def approve_expense(expense_id):
         
         if expense.company_id != current_user.company_id:
             return jsonify({'error': 'Access denied'}), 403
-        
-        # Check if user can approve this expense
+        # Role-based approval rules:
+        # - admin: can approve any pending approval for company
+        # - manager: can approve only if submitter is their direct report (or themselves if configured)
+        # - employee: cannot approve
+        if current_user.role == UserRole.employee:
+            return jsonify({'error': 'Access denied'}), 403
+
+        if current_user.role == UserRole.manager:
+            # build subordinate set recursively and check
+            subordinates = []
+            queue = [current_user.id]
+            while queue:
+                mid = queue.pop(0)
+                children = User.query.filter_by(manager_id=mid).all()
+                for c in children:
+                    if c.id not in subordinates:
+                        subordinates.append(c.id)
+                        queue.append(c.id)
+
+            if expense.submitter_id not in subordinates and expense.submitter_id != current_user.id:
+                return jsonify({'error': 'Access denied'}), 403
+
+        # Check if there is a pending approval assigned to the current approver
         approval = Approval.query.filter_by(
             expense_id=expense_id,
             approver_id=current_user_id,
             decision=ApprovalDecision.pending
         ).first()
-        
+
         if not approval:
             return jsonify({'error': 'No pending approval found for this user'}), 403
         
@@ -378,27 +532,36 @@ def create_flow():
         if current_user.role != UserRole.admin:
             return jsonify({'error': 'Admin access required'}), 403
         
-        data = request.get_json()
-        
+        data = request.get_json() or {}
+
+        # Require target user id and config in body
+        if not data.get('user_id'):
+            return jsonify({'error': 'user_id is required'}), 400
+
         if not data.get('config'):
             return jsonify({'error': 'config is required'}), 400
-        
+
         # Validate config structure
         config = data['config']
         if not isinstance(config, dict):
             return jsonify({'error': 'config must be a JSON object'}), 400
-        
-        # Create or update flow
+
+        # Validate target user exists and belongs to the same company
+        target_user = User.query.get(int(data['user_id']))
+        if not target_user or target_user.company_id != current_user.company_id:
+            return jsonify({'error': 'target user not found in your company'}), 404
+
+        # Create or update flow for the company
         flow = ApprovalFlow.query.filter_by(company_id=current_user.company_id).first()
         
         if flow:
             flow.config = config
-            flow.created_by = current_user_id
+            flow.created_by = target_user.id
         else:
             flow = ApprovalFlow(
                 company_id=current_user.company_id,
                 config=config,
-                created_by=current_user_id
+                created_by=target_user.id
             )
             db.session.add(flow)
         
@@ -426,6 +589,10 @@ def get_flow():
         
         if not current_user:
             return jsonify({'error': 'User not found'}), 401
+        
+        # Only admins can view/set approval flows
+        if current_user.role != UserRole.admin:
+            return jsonify({'error': 'Admin access required'}), 403
         
         flow = ApprovalFlow.query.filter_by(company_id=current_user.company_id).first()
         

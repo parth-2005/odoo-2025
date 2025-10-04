@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -7,6 +7,17 @@ import { toast } from "sonner";
 import { CheckCircle2, XCircle, Eye } from "lucide-react";
 import { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { sanitizeText } from "@/lib/utils";
+import { expensesApi, usersApi } from "@/lib/api";
+// Helper to get current user from localStorage (from login response)
+function getCurrentUser() {
+  try {
+    let user = localStorage.getItem("auth_user");
+    if (!user) user = localStorage.getItem("user");
+    return user ? JSON.parse(user) : null;
+  } catch {
+    return null;
+  }
+}
 
 interface ReviewExpense {
   id: string;
@@ -18,17 +29,63 @@ interface ReviewExpense {
   status: "pending" | "approved" | "rejected";
 }
 
-const Manager = () => {
-  const [expenses, setExpenses] = useState<ReviewExpense[]>([
-    { id: '1', requester: 'Sarah Johnson', date: '2025-03-18', category: 'Travel', description: 'Flight to client meeting', amount: 320, status: 'pending' },
-    { id: '2', requester: 'Michael Chen', date: '2025-03-17', category: 'Meals', description: 'Client dinner meeting', amount: 150, status: 'pending' },
-    { id: '3', requester: 'Emma Davis', date: '2025-03-16', category: 'Software', description: 'License renewal', amount: 540, status: 'approved' },
-    { id: '4', requester: 'James Wilson', date: '2025-03-15', category: 'Supplies', description: 'Office supplies', amount: 89, status: 'rejected' },
-  ]);
 
-  const updateStatus = (id: string, status: 'approved' | 'rejected') => {
-    setExpenses(prev => prev.map(e => e.id === id ? { ...e, status } : e));
-    toast.success(`Expense ${status}`);
+const Manager = () => {
+  const [expenses, setExpenses] = useState<ReviewExpense[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  // Fetch expenses on mount
+  useEffect(() => {
+    const fetchExpenses = async () => {
+      setLoading(true);
+      try {
+        const currentUser = getCurrentUser();
+        if (!currentUser) {
+          toast.error("User not found. Please log in again.");
+          setLoading(false);
+          return;
+        }
+        // Fetch all users
+        const usersRes = await usersApi.list();
+        // Filter employees who report to this manager
+        const employees = usersRes.users.filter((u: any) => u.role === "employee" && u.manager_id === currentUser.id);
+        let allExpenses: any[] = [];
+        // For each employee, fetch their expenses
+        for (const emp of employees) {
+          try {
+            const empRes = await expensesApi.list({ user_id: emp.id });
+            allExpenses.push(...empRes.expenses.map((exp: any) => ({
+              id: String(exp.id),
+              requester: emp.full_name || emp.email || "-",
+              date: exp.created_at ? exp.created_at.split("T")[0] : "-",
+              category: exp.category || "-",
+              description: exp.description,
+              amount: parseFloat(exp.amount),
+              status: exp.status,
+            })));
+          } catch (err: any) {
+            if (err.status !== 403) toast.error("Failed to load employee's expenses");
+          }
+        }
+        setExpenses(allExpenses);
+      } catch (err: any) {
+        if (err.status === 403) toast.error("You are not allowed to view these expenses.");
+        else toast.error("Failed to load expenses");
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchExpenses();
+  }, []);
+
+  const updateStatus = async (id: string, status: 'approved' | 'rejected') => {
+    try {
+      await expensesApi.approve(Number(id), status);
+      setExpenses(prev => prev.map(e => e.id === id ? { ...e, status } : e));
+      toast.success(`Expense ${status}`);
+    } catch (err: any) {
+      toast.error(`Failed to ${status} expense`);
+    }
   };
 
   const downloadAttachment = (exp: ReviewExpense) => {

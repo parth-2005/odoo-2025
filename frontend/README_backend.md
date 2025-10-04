@@ -58,6 +58,8 @@ The API will be available at `http://localhost:5000`
 ### Users
 - `POST /users` - Create user (admin only)
 - `GET /users` - List users in company
+- `PATCH /users/<user_id>` - Update user details (admin only)
+- `DELETE /users/<user_id>` - Delete user (admin only)
 
 ### Expenses
 - `POST /expenses` - Submit expense
@@ -69,6 +71,18 @@ The API will be available at `http://localhost:5000`
 - `GET /flows` - Get company's approval flow
 
 ### Audit
+
+### Role-based access & scoping
+The API enforces strict role-based scoping for visibility and approvals. Summary:
+
+- Admin: full access to company resources. Can create/update flows and view all expenses.
+- Manager: can see their own expenses and expenses of their direct reports only. Managers can approve expenses only for their direct reports.
+- Employee: can see and submit only their own expenses and cannot approve other users' expenses.
+
+These rules apply to the `/expenses` endpoints and approval flows. When a query parameter `user_id` is provided to `/expenses`, the backend enforces the same scoping rules and will return 403 if the requester is not allowed to view that user's expenses.
+
+If you need multi-level reporting (manager of manager), we can extend the scoping logic to walk the reporting tree.
+
 # Expense Management API
 
 This README documents the HTTP endpoints, request/response examples, and data models for the Expense Management API in this repository.
@@ -172,6 +186,41 @@ Response (200):
 
 ---
 
+### PATCH /users/<user_id>
+Update a user's details (admin only).
+
+Request headers:
+- Authorization: Bearer <access_token>
+
+Request JSON (fields to update):
+```json
+{
+  "email": "new@example.com",
+  "full_name": "New Name",
+  "role": "manager",
+  "manager_id": 2
+}
+```
+Response (200):
+```json
+{ "message": "User updated successfully", "user": { ... } }
+```
+
+---
+
+### DELETE /users/<user_id>
+Delete a user (admin only).
+
+Request headers:
+- Authorization: Bearer <access_token>
+
+Response (200):
+```json
+{ "message": "User deleted successfully" }
+```
+
+---
+
 ### POST /expenses
 Submit a new expense.
 
@@ -207,7 +256,13 @@ Errors: 400 for missing fields, 401 for unauthenticated, 500 for server errors.
 ---
 
 ### GET /expenses
-List expenses in your company. Supports optional query params: `status` and `user_id`.
+List expenses. Role-based scoping applies:
+
+- Admin: sees all company expenses.
+- Manager: sees only their own and direct reports' expenses.
+- Employee: sees only their own expenses.
+
+Supports optional query params: `status` and `user_id` (admin can query any user; manager may query themselves or their direct reports; employee may query only themselves).
 
 Request headers:
 - Authorization: Bearer <access_token>
@@ -224,7 +279,11 @@ Response (200):
 ---
 
 ### POST /expenses/<expense_id>/approve
-Make an approval decision for an expense (requires a pending approval for the user).
+Make an approval decision for an expense. Role-based rules:
+
+- Admin: may approve any pending approval.
+- Manager: may approve only if the expense submitter is a direct report of the manager.
+- Employee: cannot approve (403).
 
 Request headers:
 - Authorization: Bearer <access_token>
@@ -237,21 +296,23 @@ Response (200):
 ```json
 { "message": "Expense approved successfully", "expense": { "id": 10, "status": "approved" } }
 ```
-Errors: 400 for missing/invalid fields, 403 for invalid approver, 404 if expense not found, 500 for server errors.
+Errors: 400 for missing/invalid fields, 403 for invalid approver or scope, 404 if expense not found, 500 for server errors.
 
 ---
 
 ### POST /flows
-Create or update the approval flow for a company (Admin only).
+Create or update the approval flow for a company (Admin only). The endpoint now requires two fields in the body:
+
+- `user_id`: the user to associate as the creator/owner of this flow (must belong to the same company)
+- `config`: a JSON object describing the approval sequence and rules
 
 Request headers:
 - Authorization: Bearer <access_token>
 
 Request JSON (required):
 ```json
-{ "config": { "sequence": [2,5], "rules": { "specific": 2 } } }
+{ "user_id": 2, "config": { "sequence": [2,5], "rules": { "specific": 2 } } }
 ```
-- `config` must be a JSON object describing the approval sequence and rules.
 Response (201):
 ```json
 { "message": "Approval flow created successfully", "flow": { "id": 1, "config": { ... }, "created_at": "..." } }
@@ -264,6 +325,8 @@ Get the current approval flow for the authenticated user's company.
 
 Request headers:
 - Authorization: Bearer <access_token>
+
+Only admins may access approval flow configuration (returns 403 for non-admins).
 
 Response (200):
 ```json
@@ -366,4 +429,3 @@ Response (200):
 ---
 
 If you'd like, I can commit this file into the repository (done), or extend it to a full OpenAPI spec (yaml/json) and a Postman collection export for testing. Let me know which you prefer.
-
